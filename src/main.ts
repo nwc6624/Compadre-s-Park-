@@ -2,10 +2,11 @@ import './style.css'
 import * as THREE from 'three'
 
 // Game state
-enum GameState {
-  READY = 'READY',
-  PLAYING = 'PLAYING',
-  GAME_OVER = 'GAME_OVER',
+type GameState = 'READY' | 'PLAYING' | 'GAME_OVER'
+const GameState = {
+  READY: 'READY' as GameState,
+  PLAYING: 'PLAYING' as GameState,
+  GAME_OVER: 'GAME_OVER' as GameState,
 }
 
 let gameState: GameState = GameState.READY
@@ -181,8 +182,11 @@ let currentLane: number = 0 // -1 = left, 0 = center, 1 = right
 
 function handleTouchStart(e: TouchEvent): void {
   e.preventDefault()
-  // Only begin drag when the game is actively playing
-  if (gameState !== GameState.PLAYING) return
+  // If we're not playing, treat this as a tap (start / restart)
+  if (gameState !== GameState.PLAYING) {
+    handleTap(e)
+    return
+  }
 
   const touch = e.touches[0]
   touchStartX = touch.clientX
@@ -217,8 +221,11 @@ function handleTouchEnd(e: TouchEvent): void {
 
 // Mouse controls for desktop testing
 function handleMouseDown(e: MouseEvent): void {
-  // Only begin drag when the game is actively playing
-  if (gameState !== GameState.PLAYING) return
+  // If we're not playing, treat this as a tap (start / restart)
+  if (gameState !== GameState.PLAYING) {
+    handleTap(e)
+    return
+  }
 
   touchStartX = e.clientX
   touchStartY = e.clientY
@@ -296,10 +303,13 @@ function updateGame(delta: number): void {
   // Update game logic here
   // For now, just increment score as a placeholder
   // In a real game, you'd update player position, obstacles, etc.
+  elapsedSinceStart += delta
+  // Speed could increase slightly over time for difficulty scaling
+  forwardSpeed = baseForwardSpeed + Math.min(elapsedSinceStart * 0.5, 20)
   
   // Example: Update player position based on lane
-  // const targetX = currentLane * laneWidth
-  // Smooth interpolation would go here (uncomment when implementing player movement)
+  const targetZVelocity = -forwardSpeed
+  camera.position.z += targetZVelocity * delta
   
   // Increment score (example - replace with actual game logic)
   updateScore(score + Math.floor(delta * 10))
