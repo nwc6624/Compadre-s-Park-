@@ -2,29 +2,36 @@ import './style.css'
 import * as THREE from 'three'
 
 // Game state
-type GameState = 'START' | 'PLAYING' | 'GAME_OVER'
-const GameState = {
-  START: 'START' as GameState,
-  PLAYING: 'PLAYING' as GameState,
-  GAME_OVER: 'GAME_OVER' as GameState
+enum GameState {
+  READY = 'READY',
+  PLAYING = 'PLAYING',
+  GAME_OVER = 'GAME_OVER',
 }
 
-let gameState: GameState = GameState.START
-let score: number = 0
-let highScore: number = 0
+let gameState: GameState = GameState.READY
+let score = 0
+let highScore = 0
+let elapsedSinceStart = 0
+let forwardSpeed = 10
+const baseForwardSpeed = 10
 
 // Performance: Reusable geometries and materials
 const geometries: { [key: string]: THREE.BufferGeometry } = {}
 const materials: { [key: string]: THREE.Material } = {}
 
-// Delta time for frame-rate independent updates
-let lastTime: number = performance.now()
-const MAX_DELTA = 0.1 // Cap delta to prevent issues on low FPS (100ms max)
-
-// Find the canvas element
-const canvas = document.querySelector<HTMLCanvasElement>('#game-canvas')
+// Find the canvas element and HUD elements
+const canvas = document.getElementById('game-canvas') as HTMLCanvasElement
 if (!canvas) {
   throw new Error('Canvas element not found')
+}
+
+const tapOverlay = document.getElementById('tap-to-start-overlay') as HTMLDivElement | null
+const scoreEl = document.getElementById('score') as HTMLDivElement | null
+const highScoreEl = document.getElementById('high-score') as HTMLDivElement | null
+
+function updateHud() {
+  if (scoreEl) scoreEl.textContent = `Score: ${Math.floor(score)}`
+  if (highScoreEl) highScoreEl.textContent = `Best: ${Math.floor(highScore)}`
 }
 
 // Hide loading text
@@ -32,14 +39,6 @@ const loadingElement = document.querySelector<HTMLDivElement>('#loading')
 if (loadingElement) {
   loadingElement.style.display = 'none'
 }
-
-// UI Elements
-const tapToStartOverlay = document.querySelector<HTMLDivElement>('#tap-to-start')
-const gameOverOverlay = document.querySelector<HTMLDivElement>('#game-over')
-const scoreElement = document.querySelector<HTMLSpanElement>('#score')
-const highScoreElement = document.querySelector<HTMLSpanElement>('#high-score')
-const highScoreHudElement = document.querySelector<HTMLSpanElement>('#high-score-hud')
-const finalScoreElement = document.querySelector<HTMLSpanElement>('#final-score')
 
 // Load high score from localStorage
 function loadHighScore(): number {
@@ -50,16 +49,15 @@ function loadHighScore(): number {
 function saveHighScore(score: number): void {
   localStorage.setItem('blueSlideParkHighScore', score.toString())
   highScore = score
-  if (highScoreElement) highScoreElement.textContent = score.toString()
-  if (highScoreHudElement) highScoreHudElement.textContent = score.toString()
+  updateHud()
 }
 
 function updateScore(newScore: number): void {
   score = newScore
-  if (scoreElement) scoreElement.textContent = score.toString()
   if (score > highScore) {
     saveHighScore(score)
   }
+  updateHud()
 }
 
 // Create scene with light sky blue background
@@ -183,15 +181,8 @@ let currentLane: number = 0 // -1 = left, 0 = center, 1 = right
 
 function handleTouchStart(e: TouchEvent): void {
   e.preventDefault()
-  if (gameState === GameState.GAME_OVER) {
-    restartGame()
-    return
-  }
-  
-  if (gameState === GameState.START) {
-    startGame()
-    return
-  }
+  // Only begin drag when the game is actively playing
+  if (gameState !== GameState.PLAYING) return
 
   const touch = e.touches[0]
   touchStartX = touch.clientX
@@ -226,15 +217,8 @@ function handleTouchEnd(e: TouchEvent): void {
 
 // Mouse controls for desktop testing
 function handleMouseDown(e: MouseEvent): void {
-  if (gameState === GameState.GAME_OVER) {
-    restartGame()
-    return
-  }
-  
-  if (gameState === GameState.START) {
-    startGame()
-    return
-  }
+  // Only begin drag when the game is actively playing
+  if (gameState !== GameState.PLAYING) return
 
   touchStartX = e.clientX
   touchStartY = e.clientY
@@ -271,49 +255,42 @@ canvas.addEventListener('mousemove', handleMouseMove)
 canvas.addEventListener('mouseup', handleMouseUp)
 
 // Game functions
-function startGame(): void {
-  gameState = GameState.PLAYING
-  if (tapToStartOverlay) {
-    tapToStartOverlay.classList.add('hidden')
-  }
+function resetGame() {
   score = 0
-  updateScore(0)
-  currentLane = 0
+  elapsedSinceStart = 0
+  forwardSpeed = baseForwardSpeed
+  updateHud()
+  // TODO: reset player position, obstacles, slide segments, etc.
 }
 
-function triggerGameOver(): void {
+function startGame() {
+  resetGame()
+  gameState = GameState.PLAYING
+  if (tapOverlay) tapOverlay.style.display = 'none'
+}
+
+function triggerGameOver() {
   gameState = GameState.GAME_OVER
-  if (gameOverOverlay) {
-    gameOverOverlay.classList.remove('hidden')
-  }
-  if (finalScoreElement) {
-    finalScoreElement.textContent = score.toString()
+  if (score > highScore) highScore = score
+  updateHud()
+  if (tapOverlay) {
+    tapOverlay.style.display = 'flex'
+    const text = tapOverlay.querySelector('.tap-text') as HTMLDivElement | null
+    if (text) {
+      text.textContent = 'Game Over – Tap to restart'
+    }
   }
 }
 
 // Export for use in game logic
 export { triggerGameOver as gameOver }
 
-function restartGame(): void {
-  gameState = GameState.START
-  if (gameOverOverlay) {
-    gameOverOverlay.classList.add('hidden')
-  }
-  if (tapToStartOverlay) {
-    tapToStartOverlay.classList.remove('hidden')
-  }
-  score = 0
-  updateScore(0)
-  currentLane = 0
-}
-
 // Initialize high score
 highScore = loadHighScore()
-if (highScoreHudElement) highScoreHudElement.textContent = highScore.toString()
-if (highScoreElement) highScoreElement.textContent = highScore.toString()
+updateHud()
 
-// Game update function (called every frame)
-function update(deltaTime: number): void {
+// Game update function (called every frame while playing)
+function updateGame(delta: number): void {
   if (gameState !== GameState.PLAYING) return
 
   // Update game logic here
@@ -325,7 +302,7 @@ function update(deltaTime: number): void {
   // Smooth interpolation would go here (uncomment when implementing player movement)
   
   // Increment score (example - replace with actual game logic)
-  updateScore(score + Math.floor(deltaTime * 10))
+  updateScore(score + Math.floor(delta * 10))
 }
 
 // Handle window resize
@@ -336,25 +313,32 @@ function handleResize(): void {
 }
 window.addEventListener('resize', handleResize)
 
-// Animation loop with delta time
-function animate(): void {
+// Animation loop
+let lastTime = 0
+
+function animate(time: number) {
   requestAnimationFrame(animate)
-  
-  // Calculate delta time
-  const currentTime = performance.now()
-  let deltaTime = (currentTime - lastTime) / 1000 // Convert to seconds
-  lastTime = currentTime
-  
-  // Clamp delta time to prevent issues on low FPS
-  deltaTime = Math.min(deltaTime, MAX_DELTA)
-  
-  // Update game
-  update(deltaTime)
-  
-  // Render
+  const delta = Math.min((time - lastTime) / 1000, 0.05)
+  lastTime = time
+
+  if (gameState === GameState.PLAYING) {
+    updateGame(delta) // your movement logic
+  }
+
   renderer.render(scene, camera)
 }
 
-// Start animation loop (always runs, but game logic only updates when playing)
-lastTime = performance.now()
-animate()
+requestAnimationFrame(animate)
+
+// Tap-to-start / restart handlers
+function handleTap(ev: Event) {
+  ev.preventDefault()
+  if (gameState === GameState.READY || gameState === GameState.GAME_OVER) {
+    startGame()
+  }
+}
+
+if (tapOverlay) {
+  tapOverlay.addEventListener('click', handleTap)
+  tapOverlay.addEventListener('touchstart', handleTap, { passive: false })
+}

@@ -255,3 +255,52 @@ canvas {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
 }
+
+/* Required layout styles */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+}
+
+#game-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#hud {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 5;
+  color: white;
+  font-family: system-ui, sans-serif;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.7);
+  pointer-events: none;
+}
+
+#tap-to-start-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.4);
+  z-index: 10;
+  pointer-events: auto; /* <- IMPORTANT */
+}
+
+#tap-to-start-overlay .tap-text {
+  font-size: 2rem;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.7);
+  padding: 1rem 2rem;
+  background: rgba(15,42,95,0.9);
+  border-radius: 999px;
+  -webkit-user-select: none;
+  user-select: none;
+}
