@@ -2,19 +2,43 @@ import * as THREE from "three";
 
 
 
+// ----------------- ADD THIS -----------------
+
 enum GameState {
 
-  READY = "READY",
+  Menu = "MENU",
 
-  PLAYING = "PLAYING",
+  Playing = "PLAYING",
 
-  GAME_OVER = "GAME_OVER",
+  GameOver = "GAME_OVER",
 
 }
 
+let gameState: GameState = GameState.Menu;
 
 
-let gameState: GameState = GameState.READY;
+
+let playerMesh: THREE.Mesh | null = null;
+
+let trackSegments: THREE.Mesh[] = [];
+
+let obstacles: THREE.Mesh[] = [];
+
+
+
+let currentScore = 0;
+
+let bestScore = 0;
+
+let lastObstacleZ = 0;
+
+
+
+const TRACK_SEGMENT_LENGTH = 10;
+
+const TRACK_SPEED = 0.25;  // can adjust later
+
+// --------------------------------------------------
 
 
 
@@ -112,6 +136,106 @@ function updateHud() {
 
 
 
+function updateScoreUI(score: number, best: number) {
+
+  if (scoreEl) scoreEl.textContent = `Score: ${Math.floor(score)}`;
+
+  if (highScoreEl) highScoreEl.textContent = `Best: ${Math.floor(best)}`;
+
+}
+
+
+
+function hideMenuOverlay() {
+
+  if (tapOverlay) {
+
+    tapOverlay.style.display = "none";
+
+  }
+
+  // Hide share/edit buttons when gameState === Playing
+
+  const shareBtn = document.getElementById("share-button") as HTMLElement | null;
+
+  const editBtn = document.getElementById("edit-button") as HTMLElement | null;
+
+  if (shareBtn) shareBtn.style.display = "none";
+
+  if (editBtn) editBtn.style.display = "none";
+
+}
+
+
+
+function showMenuOverlay() {
+
+  if (tapOverlay) {
+
+    tapOverlay.style.display = "flex";
+
+    const text = tapOverlay.querySelector(".tap-text") as HTMLDivElement | null;
+
+    if (text) {
+
+      text.textContent = "Tap to start";
+
+    }
+
+  }
+
+  // Show share/edit buttons in Menu state
+
+  const shareBtn = document.getElementById("share-button") as HTMLElement | null;
+
+  const editBtn = document.getElementById("edit-button") as HTMLElement | null;
+
+  if (shareBtn) shareBtn.style.display = "block";
+
+  if (editBtn) editBtn.style.display = "block";
+
+}
+
+
+
+function showGameOverOverlay() {
+
+  // Show restart button ONLY when gameState === GameOver
+
+  const restartBtn = document.getElementById("restart-button") as HTMLElement | null;
+
+  
+
+  if (gameState === GameState.GameOver) {
+
+    if (tapOverlay) {
+
+      tapOverlay.style.display = "flex";
+
+      const text = tapOverlay.querySelector(".tap-text") as HTMLDivElement | null;
+
+      if (text) {
+
+        text.textContent = "Game Over – Tap to restart";
+
+      }
+
+    }
+
+    if (restartBtn) restartBtn.style.display = "block";
+
+  } else {
+
+    // Hide restart button when not in GameOver state
+
+    if (restartBtn) restartBtn.style.display = "none";
+
+  }
+
+}
+
+
+
 // ----- World creation -----
 
 
@@ -188,17 +312,91 @@ function onWindowResize() {
 
 function createPlayer() {
 
-  const geom = new THREE.SphereGeometry(0.5, 16, 16);
+  if (playerMesh) scene.remove(playerMesh);
 
-  const mat = new THREE.MeshPhongMaterial({ color: 0xffffff });
 
-  player = new THREE.Mesh(geom, mat);
 
-  player.castShadow = true;
+  const geo = new THREE.SphereGeometry(0.5, 32, 32);
 
-  player.position.set(0, 1, 0);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff });
 
-  scene.add(player);
+  playerMesh = new THREE.Mesh(geo, mat);
+
+  playerMesh.position.set(0, 0.5, 0); // center lane
+
+  scene.add(playerMesh);
+
+}
+
+
+
+function createInitialTrack() {
+
+  trackSegments.forEach(s => scene.remove(s));
+
+  trackSegments = [];
+
+
+
+  obstacles.forEach(o => scene.remove(o));
+
+  obstacles = [];
+
+  lastObstacleZ = 0;
+
+
+
+  const trackWidth = 6; // 3 lanes
+
+  const segmentCount = 20;
+
+
+
+  for (let i = 0; i < segmentCount; i++) {
+
+    const geo = new THREE.BoxGeometry(trackWidth, 0.2, TRACK_SEGMENT_LENGTH);
+
+    const mat = new THREE.MeshStandardMaterial({ color: 0x0050a0 }); // blue
+
+    const mesh = new THREE.Mesh(geo, mat);
+
+    mesh.position.set(0, 0, -i * TRACK_SEGMENT_LENGTH);
+
+    trackSegments.push(mesh);
+
+    scene.add(mesh);
+
+  }
+
+}
+
+
+
+function spawnObstacleRow(zPos: number) {
+
+  const lanes = [-2, 0, 2];
+
+  const laneIndex = Math.floor(Math.random() * lanes.length);
+
+  const xPos = lanes[laneIndex];
+
+
+
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+
+  const mat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+
+  const obstacle = new THREE.Mesh(geo, mat);
+
+  obstacle.position.set(xPos, 0.5, zPos);
+
+
+
+  obstacles.push(obstacle);
+
+  scene.add(obstacle);
+
+  lastObstacleZ = zPos;
 
 }
 
@@ -400,45 +598,39 @@ function resetGame() {
 
 function startGame() {
 
-  resetGame();
+  gameState = GameState.Playing;
 
-  gameState = GameState.PLAYING;
+  currentScore = 0;
 
-  if (tapOverlay) {
 
-    tapOverlay.style.display = "none";
 
-  }
+  createPlayer();
+
+  createInitialTrack();
+
+  spawnObstacleRow(-25);
+
+
+
+  updateScoreUI(currentScore, bestScore);  // should already exist
+
+  hideMenuOverlay();                       // must hide "tap to start" + share/edit
 
 }
 
 
 
-function triggerGameOver() {
+function endGame() {
 
-  gameState = GameState.GAME_OVER;
+  gameState = GameState.GameOver;
 
-  if (score > highScore) {
+  if (currentScore > bestScore) bestScore = currentScore;
 
-    highScore = score;
 
-  }
 
-  updateHud();
+  updateScoreUI(currentScore, bestScore);
 
-  if (tapOverlay) {
-
-    tapOverlay.style.display = "flex";
-
-    const text = tapOverlay.querySelector(".tap-text") as HTMLDivElement | null;
-
-    if (text) {
-
-      text.textContent = "Game Over – Tap to restart";
-
-    }
-
-  }
+  showGameOverOverlay();  // should display "Game Over – tap to restart"
 
 }
 
@@ -482,7 +674,7 @@ function checkCollisions() {
 
     if (distSq < combined * combined) {
 
-      triggerGameOver();
+      endGame();
 
       return;
 
@@ -606,19 +798,85 @@ let lastTime = 0;
 
 
 
-function animate(time: number) {
+function animate() {
 
   requestAnimationFrame(animate);
 
-  const delta = Math.min((time - lastTime) / 1000, 0.05);
-
-  lastTime = time;
 
 
+  if (gameState === GameState.Playing) {
 
-  if (gameState === GameState.PLAYING) {
+    // Move track segments
 
-    updateGame(delta);
+    trackSegments.forEach(seg => seg.position.z += TRACK_SPEED);
+
+
+
+    // Recycle segments
+
+    const maxZ = 5;
+
+    trackSegments.forEach(seg => {
+
+      if (seg.position.z > maxZ) {
+
+        const minZ = Math.min(...trackSegments.map(s => s.position.z));
+
+        seg.position.z = minZ - TRACK_SEGMENT_LENGTH;
+
+      }
+
+    });
+
+
+
+    // Move obstacles
+
+    obstacles.forEach(o => o.position.z += TRACK_SPEED);
+
+
+
+    // Spawn new obstacles
+
+    const neededZ = Math.min(...trackSegments.map(s => s.position.z)) - 15;
+
+    if (lastObstacleZ > neededZ) {
+
+      spawnObstacleRow(lastObstacleZ - 10);
+
+    }
+
+
+
+    // Update score
+
+    currentScore += TRACK_SPEED * 0.1;
+
+    updateScoreUI(Math.floor(currentScore), bestScore);
+
+
+
+    // Collision detection
+
+    if (playerMesh) {
+
+      const playerBox = new THREE.Box3().setFromObject(playerMesh);
+
+      for (const ob of obstacles) {
+
+        const obBox = new THREE.Box3().setFromObject(ob);
+
+        if (playerBox.intersectsBox(obBox)) {
+
+          endGame();
+
+          break;
+
+        }
+
+      }
+
+    }
 
   }
 
@@ -638,11 +896,7 @@ function handleOverlayTap(ev: Event) {
 
   ev.preventDefault();
 
-  if (gameState === GameState.READY || gameState === GameState.GAME_OVER) {
-
-    startGame();
-
-  }
+  startGame();
 
 }
 
@@ -658,7 +912,7 @@ createWorld();
 
 updateHud();
 
-requestAnimationFrame(animate);
+animate();  // <-- make sure this is called ONCE during setup!
 
 
 
@@ -767,5 +1021,31 @@ if (tapOverlay) {
     { passive: false }
 
   );
+
+}
+
+
+
+// Restart button handler - make sure tap/click on restart calls startGame()
+
+const restartBtn = document.getElementById("restart-button") as HTMLElement | null;
+
+if (restartBtn) {
+
+  restartBtn.addEventListener("click", (ev) => {
+
+    ev.preventDefault();
+
+    startGame();
+
+  });
+
+  restartBtn.addEventListener("touchstart", (ev) => {
+
+    ev.preventDefault();
+
+    startGame();
+
+  }, { passive: false });
 
 }
