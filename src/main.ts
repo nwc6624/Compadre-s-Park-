@@ -16,9 +16,20 @@ let elapsedSinceStart = 0
 let forwardSpeed = 10
 const baseForwardSpeed = 10
 
-// Performance: Reusable geometries and materials
-const geometries: { [key: string]: THREE.BufferGeometry } = {}
-const materials: { [key: string]: THREE.Material } = {}
+// Lanes: left, center, right
+const LANE_X_POSITIONS = [-1.5, 0, 1.5]
+let currentLaneIndex = 1 // start in center
+let targetLaneX = LANE_X_POSITIONS[currentLaneIndex]
+
+// Three.js objects
+let player: THREE.Mesh
+const slideSegments: THREE.Mesh[] = []
+const obstacles: THREE.Mesh[] = []
+
+// Config
+const SEGMENT_LENGTH = 20
+const SEGMENT_COUNT = 8
+const OBSTACLE_CHANCE_PER_SEGMENT = 0.5 // 50% chance
 
 // Find the canvas element and HUD elements
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement
@@ -72,202 +83,186 @@ const camera = new THREE.PerspectiveCamera(
   0.1, // Near plane
   1000 // Far plane
 )
-camera.position.set(0, 5, 10)
+camera.position.set(0, 2.5, 8)
 camera.lookAt(0, 0, 0)
 
 // Create renderer
 const renderer = new THREE.WebGLRenderer({
   canvas: canvas,
   antialias: true,
-  powerPreference: 'high-performance'
+  powerPreference: 'high-performance',
 })
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)) // Cap pixel ratio for performance
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
 
-// Performance: Use minimal lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.7)
+// Lighting
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
 scene.add(ambientLight)
 
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5)
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
 directionalLight.position.set(5, 10, 5)
 directionalLight.castShadow = true
-directionalLight.shadow.mapSize.width = 1024 // Reduced from 2048 for performance
+directionalLight.shadow.mapSize.width = 1024
 directionalLight.shadow.mapSize.height = 1024
 scene.add(directionalLight)
 
-// Performance: Reusable geometry and material functions
-function getGeometry(key: string, factory: () => THREE.BufferGeometry): THREE.BufferGeometry {
-  if (!geometries[key]) {
-    geometries[key] = factory()
+// World setup
+function createPlayer() {
+  const geom = new THREE.SphereGeometry(0.5, 16, 16)
+  const mat = new THREE.MeshPhongMaterial({ color: 0xffffff })
+  player = new THREE.Mesh(geom, mat)
+  player.position.set(0, 1, 5) // slightly in front of camera origin
+  scene.add(player)
+}
+
+function createSlideSegment(zIndex: number): THREE.Mesh {
+  const geom = new THREE.BoxGeometry(5, 0.2, SEGMENT_LENGTH)
+  const mat = new THREE.MeshPhongMaterial({ color: 0x1e7be6 })
+  const mesh = new THREE.Mesh(geom, mat)
+  mesh.position.set(0, 0, -zIndex * SEGMENT_LENGTH)
+  mesh.receiveShadow = true
+  scene.add(mesh)
+  return mesh
+}
+
+function spawnObstacleOnSegment(segment: THREE.Mesh) {
+  if (Math.random() > OBSTACLE_CHANCE_PER_SEGMENT) return
+
+  const laneIndex = Math.floor(Math.random() * LANE_X_POSITIONS.length)
+  const x = LANE_X_POSITIONS[laneIndex]
+
+  const geom = new THREE.BoxGeometry(0.8, 0.8, 0.8)
+  const mat = new THREE.MeshPhongMaterial({ color: 0xff4444 })
+  const box = new THREE.Mesh(geom, mat)
+
+  // Place slightly above the segment surface, somewhere along its length
+  const localZ = Math.random() * SEGMENT_LENGTH - SEGMENT_LENGTH / 2
+  box.position.set(x, 0.6, segment.position.z + localZ)
+
+  scene.add(box)
+  obstacles.push(box)
+}
+
+function createWorld() {
+  // Clear any previous world (if restarting)
+  slideSegments.forEach((seg) => scene.remove(seg))
+  slideSegments.length = 0
+  obstacles.forEach((o) => scene.remove(o))
+  obstacles.length = 0
+
+  // Create slide segments in a row
+  for (let i = 0; i < SEGMENT_COUNT; i++) {
+    const seg = createSlideSegment(i)
+    slideSegments.push(seg)
+    spawnObstacleOnSegment(seg)
   }
-  return geometries[key]
-}
 
-function getMaterial(key: string, factory: () => THREE.Material): THREE.Material {
-  if (!materials[key]) {
-    materials[key] = factory()
+  // Player
+  if (!player) {
+    createPlayer()
+  } else {
+    player.position.set(0, 1, 5)
   }
-  return materials[key]
 }
 
-// Create slide mesh with texture support
-function createSlide(): THREE.Mesh {
-  // Reuse geometry
-  const slideGeometry = getGeometry('slide', () => {
-    const geo = new THREE.PlaneGeometry(10, 15)
-    geo.rotateX(-Math.PI / 6) // Rotate 30 degrees down
-    geo.translate(0, -2, 0) // Move down a bit
-    return geo
-  })
+// Input handling
+let isDragging = false
+let dragStartX = 0
+let dragCurrentX = 0
 
-  // Reuse material
-  const slideMaterial = getMaterial('slide', () => {
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x1e90ff, // Bright blue (DodgerBlue)
-      metalness: 0.1,
-      roughness: 0.3,
-    })
-
-    // Try to load texture, fallback to solid blue
-    const textureLoader = new THREE.TextureLoader()
-    textureLoader.load(
-      '/assets/slide_texture.png',
-      (texture) => {
-        texture.wrapS = THREE.RepeatWrapping
-        texture.wrapT = THREE.RepeatWrapping
-        texture.repeat.set(2, 2)
-        mat.map = texture
-        mat.needsUpdate = true
-      },
-      undefined,
-      () => {
-        console.log('Slide texture not found, using solid blue color')
-      }
-    )
-
-    return mat
-  }) as THREE.MeshStandardMaterial
-
-  const slide = new THREE.Mesh(slideGeometry, slideMaterial)
-  slide.receiveShadow = true
-  slide.castShadow = true
-
-  return slide
+function setLane(index: number) {
+  currentLaneIndex = Math.max(0, Math.min(LANE_X_POSITIONS.length - 1, index))
+  targetLaneX = LANE_X_POSITIONS[currentLaneIndex]
 }
 
-// Add slide to scene
-const slide = createSlide()
-scene.add(slide)
-
-// Add ground plane (reuse geometry and material)
-const groundGeometry = getGeometry('ground', () => new THREE.PlaneGeometry(50, 50))
-const groundMaterial = getMaterial('ground', () => new THREE.MeshStandardMaterial({
-  color: 0xffffff, // White ground
-  roughness: 0.8,
-}))
-const ground = new THREE.Mesh(groundGeometry, groundMaterial)
-ground.rotation.x = -Math.PI / 2
-ground.position.y = -5
-ground.receiveShadow = true
-scene.add(ground)
-
-// Touch controls
-let touchStartX: number = 0
-let touchStartY: number = 0
-let isDragging: boolean = false
-let currentLane: number = 0 // -1 = left, 0 = center, 1 = right
-// const laneWidth: number = 3 // Reserved for player movement implementation
-
-function handleTouchStart(e: TouchEvent): void {
-  e.preventDefault()
+function onPointerDown(clientX: number) {
   // If we're not playing, treat this as a tap (start / restart)
   if (gameState !== GameState.PLAYING) {
-    handleTap(e)
+    handleTap(new Event('pointerdown'))
     return
   }
 
-  const touch = e.touches[0]
-  touchStartX = touch.clientX
-  touchStartY = touch.clientY
   isDragging = true
+  dragStartX = clientX
+  dragCurrentX = clientX
 }
 
-function handleTouchMove(e: TouchEvent): void {
-  if (!isDragging || gameState !== GameState.PLAYING) return
-  e.preventDefault()
-  
-  const touch = e.touches[0]
-  const deltaX = touch.clientX - touchStartX
-  const deltaY = touch.clientY - touchStartY
-  
-  // Only process horizontal swipes (ignore if vertical movement is greater)
-  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 30) {
-    if (deltaX > 0 && currentLane < 1) {
-      currentLane++
-      touchStartX = touch.clientX // Update start position
-    } else if (deltaX < 0 && currentLane > -1) {
-      currentLane--
-      touchStartX = touch.clientX // Update start position
-    }
+function onPointerMove(clientX: number) {
+  if (!isDragging) return
+  dragCurrentX = clientX
+}
+
+function onPointerUp() {
+  if (!isDragging) return
+  const deltaX = dragCurrentX - dragStartX
+
+  // Simple threshold swipe
+  const SWIPE_THRESHOLD = 40
+  if (deltaX > SWIPE_THRESHOLD) {
+    setLane(currentLaneIndex + 1)
+  } else if (deltaX < -SWIPE_THRESHOLD) {
+    setLane(currentLaneIndex - 1)
   }
-}
 
-function handleTouchEnd(e: TouchEvent): void {
-  e.preventDefault()
   isDragging = false
 }
 
-// Mouse controls for desktop testing
-function handleMouseDown(e: MouseEvent): void {
-  // If we're not playing, treat this as a tap (start / restart)
-  if (gameState !== GameState.PLAYING) {
-    handleTap(e)
-    return
+// Wire to mouse/touch events on the canvas
+canvas.addEventListener('mousedown', (e) => {
+  e.preventDefault()
+  onPointerDown(e.clientX)
+})
+
+canvas.addEventListener('mousemove', (e) => {
+  e.preventDefault()
+  onPointerMove(e.clientX)
+})
+
+canvas.addEventListener('mouseup', (e) => {
+  e.preventDefault()
+  onPointerUp()
+})
+
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length > 0) {
+    e.preventDefault()
+    onPointerDown(e.touches[0].clientX)
   }
+}, { passive: false })
 
-  touchStartX = e.clientX
-  touchStartY = e.clientY
-  isDragging = true
-}
-
-function handleMouseMove(e: MouseEvent): void {
-  if (!isDragging || gameState !== GameState.PLAYING) return
-  
-  const deltaX = e.clientX - touchStartX
-  const deltaY = e.clientY - touchStartY
-  
-  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 30) {
-    if (deltaX > 0 && currentLane < 1) {
-      currentLane++
-      touchStartX = e.clientX
-    } else if (deltaX < 0 && currentLane > -1) {
-      currentLane--
-      touchStartX = e.clientX
-    }
+canvas.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 0) {
+    e.preventDefault()
+    onPointerMove(e.touches[0].clientX)
   }
-}
+}, { passive: false })
 
-function handleMouseUp(): void {
-  isDragging = false
-}
-
-// Add event listeners
-canvas.addEventListener('touchstart', handleTouchStart, { passive: false })
-canvas.addEventListener('touchmove', handleTouchMove, { passive: false })
-canvas.addEventListener('touchend', handleTouchEnd, { passive: false })
-canvas.addEventListener('mousedown', handleMouseDown)
-canvas.addEventListener('mousemove', handleMouseMove)
-canvas.addEventListener('mouseup', handleMouseUp)
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault()
+  onPointerUp()
+}, { passive: false })
 
 // Game functions
 function resetGame() {
   score = 0
   elapsedSinceStart = 0
   forwardSpeed = baseForwardSpeed
+  currentLaneIndex = 1
+  targetLaneX = LANE_X_POSITIONS[currentLaneIndex]
+
+  // Rebuild world (segments + obstacles + player position)
+  createWorld()
+
+  // Place player in the correct lane
+  if (player) {
+    player.position.x = targetLaneX
+    player.position.y = 1
+    player.position.z = 5
+  }
+
   updateHud()
-  // TODO: reset player position, obstacles, slide segments, etc.
 }
 
 function startGame() {
@@ -292,27 +287,95 @@ function triggerGameOver() {
 // Export for use in game logic
 export { triggerGameOver as gameOver }
 
+// Collision detection
+function checkCollisions() {
+  if (!player) return
+
+  const playerPos = player.position
+  const playerRadius = 0.5
+
+  const toRemove: THREE.Mesh[] = []
+
+  for (const o of obstacles) {
+    const dx = o.position.x - playerPos.x
+    const dy = o.position.y - playerPos.y
+    const dz = o.position.z - playerPos.z
+    const distSq = dx * dx + dy * dy + dz * dz
+
+    const obstacleRadius = 0.6
+    const combined = playerRadius + obstacleRadius
+
+    // Hit if close enough in 3D
+    if (distSq < combined * combined) {
+      // Collision = game over
+      triggerGameOver()
+      return
+    }
+
+    // If obstacle is far behind camera, clean it up
+    if (o.position.z > camera.position.z + 10) {
+      toRemove.push(o)
+    }
+  }
+
+  // Remove old obstacles
+  if (toRemove.length > 0) {
+    for (const o of toRemove) {
+      const idx = obstacles.indexOf(o)
+      if (idx !== -1) obstacles.splice(idx, 1)
+      scene.remove(o)
+    }
+  }
+}
+
 // Initialize high score
 highScore = loadHighScore()
 updateHud()
+
+// Initial world setup
+createWorld()
 
 // Game update function (called every frame while playing)
 function updateGame(delta: number): void {
   if (gameState !== GameState.PLAYING) return
 
-  // Update game logic here
-  // For now, just increment score as a placeholder
-  // In a real game, you'd update player position, obstacles, etc.
+  // Increase difficulty slightly over time
   elapsedSinceStart += delta
-  // Speed could increase slightly over time for difficulty scaling
-  forwardSpeed = baseForwardSpeed + Math.min(elapsedSinceStart * 0.5, 20)
-  
-  // Example: Update player position based on lane
-  const targetZVelocity = -forwardSpeed
-  camera.position.z += targetZVelocity * delta
-  
-  // Increment score (example - replace with actual game logic)
-  updateScore(score + Math.floor(delta * 10))
+  forwardSpeed = baseForwardSpeed + elapsedSinceStart * 0.5
+
+  // Score based on time survived
+  score += delta * 10
+  updateHud()
+
+  // Smoothly move player toward target lane X
+  if (player) {
+    const LERP_FACTOR = 10 // higher = snappier
+    player.position.x += (targetLaneX - player.position.x) * Math.min(LERP_FACTOR * delta, 1)
+  }
+
+  // Move slide segments "toward" the camera
+  slideSegments.forEach((seg) => {
+    seg.position.z += forwardSpeed * delta
+
+    // Recycle segment if it passes behind camera
+    if (seg.position.z - SEGMENT_LENGTH / 2 > camera.position.z + 5) {
+      seg.position.z -= SEGMENT_LENGTH * SEGMENT_COUNT
+
+      // Random slight horizontal wiggle
+      seg.position.x = (Math.random() - 0.5) * 1.0
+
+      // Spawn new obstacle(s) for this recycled segment
+      spawnObstacleOnSegment(seg)
+    }
+  })
+
+  // Move obstacles along z as well
+  obstacles.forEach((o) => {
+    o.position.z += forwardSpeed * delta
+  })
+
+  // Collision detection
+  checkCollisions()
 }
 
 // Handle window resize
