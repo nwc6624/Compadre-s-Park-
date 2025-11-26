@@ -83,8 +83,8 @@ const camera = new THREE.PerspectiveCamera(
   0.1, // Near plane
   1000 // Far plane
 )
-camera.position.set(0, 2.5, 8)
-camera.lookAt(0, 0, 0)
+camera.position.set(0, 3, 8)
+camera.lookAt(0, 1, -20)
 
 // Create renderer
 const renderer = new THREE.WebGLRenderer({
@@ -108,23 +108,31 @@ directionalLight.shadow.mapSize.width = 1024
 directionalLight.shadow.mapSize.height = 1024
 scene.add(directionalLight)
 
-// World setup
-function createPlayer() {
-  const geom = new THREE.SphereGeometry(0.5, 16, 16)
-  const mat = new THREE.MeshPhongMaterial({ color: 0xffffff })
-  player = new THREE.Mesh(geom, mat)
-  player.position.set(0, 1, 5) // slightly in front of camera origin
-  scene.add(player)
-}
+// Initialize high score
+highScore = loadHighScore()
 
+// World setup
 function createSlideSegment(zIndex: number): THREE.Mesh {
   const geom = new THREE.BoxGeometry(5, 0.2, SEGMENT_LENGTH)
   const mat = new THREE.MeshPhongMaterial({ color: 0x1e7be6 })
   const mesh = new THREE.Mesh(geom, mat)
+
+  // Segments start at z = 0 and extend into negative Z (into the distance)
   mesh.position.set(0, 0, -zIndex * SEGMENT_LENGTH)
   mesh.receiveShadow = true
   scene.add(mesh)
   return mesh
+}
+
+function createPlayer() {
+  const geom = new THREE.SphereGeometry(0.5, 16, 16)
+  const mat = new THREE.MeshPhongMaterial({ color: 0xffffff })
+  player = new THREE.Mesh(geom, mat)
+  player.castShadow = true
+
+  // Start slightly above the slide, in the center lane
+  player.position.set(0, 1, 0)
+  scene.add(player)
 }
 
 function spawnObstacleOnSegment(segment: THREE.Mesh) {
@@ -146,26 +154,36 @@ function spawnObstacleOnSegment(segment: THREE.Mesh) {
 }
 
 function createWorld() {
-  // Clear any previous world (if restarting)
-  slideSegments.forEach((seg) => scene.remove(seg))
+  // Clear old segments and obstacles if they exist
+  slideSegments.forEach(seg => scene.remove(seg))
   slideSegments.length = 0
-  obstacles.forEach((o) => scene.remove(o))
+  obstacles.forEach(o => scene.remove(o))
   obstacles.length = 0
 
-  // Create slide segments in a row
+  // Build a row of segments out into the distance
   for (let i = 0; i < SEGMENT_COUNT; i++) {
     const seg = createSlideSegment(i)
     slideSegments.push(seg)
     spawnObstacleOnSegment(seg)
   }
 
-  // Player
+  // Ensure player exists and is reset
   if (!player) {
     createPlayer()
   } else {
-    player.position.set(0, 1, 5)
+    player.position.set(0, 1, 0)
   }
+
+  // Reset lane state
+  currentLaneIndex = 1
+  targetLaneX = LANE_X_POSITIONS[currentLaneIndex]
+  player.position.x = targetLaneX
 }
+
+// Initialize world after scene, lights, and camera setup
+highScore = loadHighScore()
+createWorld()
+updateHud()
 
 // Input handling
 let isDragging = false
@@ -252,16 +270,7 @@ function resetGame() {
   currentLaneIndex = 1
   targetLaneX = LANE_X_POSITIONS[currentLaneIndex]
 
-  // Rebuild world (segments + obstacles + player position)
   createWorld()
-
-  // Place player in the correct lane
-  if (player) {
-    player.position.x = targetLaneX
-    player.position.y = 1
-    player.position.z = 5
-  }
-
   updateHud()
 }
 
@@ -273,8 +282,12 @@ function startGame() {
 
 function triggerGameOver() {
   gameState = GameState.GAME_OVER
-  if (score > highScore) highScore = score
+
+  if (score > highScore) {
+    highScore = score
+  }
   updateHud()
+
   if (tapOverlay) {
     tapOverlay.style.display = 'flex'
     const text = tapOverlay.querySelector('.tap-text') as HTMLDivElement | null
@@ -293,7 +306,6 @@ function checkCollisions() {
 
   const playerPos = player.position
   const playerRadius = 0.5
-
   const toRemove: THREE.Mesh[] = []
 
   for (const o of obstacles) {
@@ -305,20 +317,18 @@ function checkCollisions() {
     const obstacleRadius = 0.6
     const combined = playerRadius + obstacleRadius
 
-    // Hit if close enough in 3D
+    // Collision with obstacle
     if (distSq < combined * combined) {
-      // Collision = game over
       triggerGameOver()
       return
     }
 
-    // If obstacle is far behind camera, clean it up
+    // Remove if far behind camera
     if (o.position.z > camera.position.z + 10) {
       toRemove.push(o)
     }
   }
 
-  // Remove old obstacles
   if (toRemove.length > 0) {
     for (const o of toRemove) {
       const idx = obstacles.indexOf(o)
@@ -328,22 +338,14 @@ function checkCollisions() {
   }
 }
 
-// Initialize high score
-highScore = loadHighScore()
-updateHud()
-
-// Initial world setup
-createWorld()
 
 // Game update function (called every frame while playing)
-function updateGame(delta: number): void {
-  if (gameState !== GameState.PLAYING) return
-
-  // Increase difficulty slightly over time
+function updateGame(delta: number) {
+  // Increase difficulty over time
   elapsedSinceStart += delta
   forwardSpeed = baseForwardSpeed + elapsedSinceStart * 0.5
 
-  // Score based on time survived
+  // Score based on survival time
   score += delta * 10
   updateHud()
 
@@ -353,28 +355,40 @@ function updateGame(delta: number): void {
     player.position.x += (targetLaneX - player.position.x) * Math.min(LERP_FACTOR * delta, 1)
   }
 
-  // Move slide segments "toward" the camera
+  // Move slide segments toward the camera
   slideSegments.forEach((seg) => {
     seg.position.z += forwardSpeed * delta
 
-    // Recycle segment if it passes behind camera
+    // When a segment passes behind the camera, recycle it far ahead
     if (seg.position.z - SEGMENT_LENGTH / 2 > camera.position.z + 5) {
       seg.position.z -= SEGMENT_LENGTH * SEGMENT_COUNT
 
-      // Random slight horizontal wiggle
+      // Small horizontal wiggle for variety
       seg.position.x = (Math.random() - 0.5) * 1.0
 
-      // Spawn new obstacle(s) for this recycled segment
+      // Clear old obstacles near this segment and spawn new ones
+      obstacles.forEach((o) => {
+        // If obstacle is roughly aligned with this segment's z, remove it
+        if (Math.abs(o.position.z - seg.position.z) < SEGMENT_LENGTH * 0.6) {
+          scene.remove(o)
+        }
+      })
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        if (!scene.children.includes(obstacles[i])) {
+          obstacles.splice(i, 1)
+        }
+      }
+
       spawnObstacleOnSegment(seg)
     }
   })
 
-  // Move obstacles along z as well
+  // Move obstacles along Z too
   obstacles.forEach((o) => {
     o.position.z += forwardSpeed * delta
   })
 
-  // Collision detection
+  // Clean up obstacles far behind camera and check collisions
   checkCollisions()
 }
 
