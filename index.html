@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Compadre's Park</title>
+  </head>
+  <body>
+    <div id="loading">Loading...</div>
+    <img src="/assets/logo_blue_slide_park.png" class="game-logo" alt="Blue Slide Park" />
+    <canvas id="game-canvas"></canvas>
+    
+    <!-- Game UI Overlays -->
+    <div id="tap-to-start" class="overlay">
+      <div class="overlay-content">
+        <h2>Tap to Start</h2>
+      </div>
+    </div>
+    
+    <div id="game-over" class="overlay hidden">
+      <div class="overlay-content">
+        <h2>Game Over</h2>
+        <p class="final-score">Score: <span id="final-score">0</span></p>
+        <p class="high-score">High Score: <span id="high-score">0</span></p>
+        <p class="tap-hint">Tap to Restart</p>
+      </div>
+    </div>
+    
+    <div id="hud" class="hud">
+      <div class="score">Score: <span id="score">0</span></div>
+      <div class="high-score-hud">High: <span id="high-score-hud">0</span></div>
+    </div>
+    
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
