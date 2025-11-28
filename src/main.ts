@@ -2,17 +2,199 @@ import * as THREE from "three";
 
 
 
-// ----------------- ADD THIS -----------------
+// ---------- Basic DOM setup ----------
 
-enum GameState {
+// Target the game-root div inside the phone screen instead of clearing the body
 
-  Menu = "MENU",
+const root = document.getElementById("game-root");
 
-  Playing = "PLAYING",
+if (!root) {
 
-  GameOver = "GAME_OVER",
+  console.warn("No #game-root element found. The game will not mount.");
 
 }
+
+// DO NOT clear root.children anymore
+
+// Use parent for appending (root or body as fallback)
+
+const parent = root || document.body;
+
+
+
+// Create score labels
+
+const scoreLabel = document.createElement("div");
+
+scoreLabel.id = "score-label";
+
+scoreLabel.style.position = "absolute";
+
+scoreLabel.style.top = "16px";
+
+scoreLabel.style.left = "16px";
+
+scoreLabel.style.zIndex = "10";
+
+scoreLabel.style.color = "white";
+
+scoreLabel.style.fontFamily = "sans-serif";
+
+scoreLabel.style.fontSize = "20px";
+
+scoreLabel.style.textShadow = "0 0 4px rgba(0,0,0,0.6)";
+
+parent.appendChild(scoreLabel);
+
+
+
+const bestLabel = document.createElement("div");
+
+bestLabel.id = "best-label";
+
+bestLabel.style.position = "absolute";
+
+bestLabel.style.top = "40px";
+
+bestLabel.style.left = "16px";
+
+bestLabel.style.zIndex = "10";
+
+bestLabel.style.color = "white";
+
+bestLabel.style.fontFamily = "sans-serif";
+
+bestLabel.style.fontSize = "20px";
+
+bestLabel.style.textShadow = "0 0 4px rgba(0,0,0,0.6)";
+
+parent.appendChild(bestLabel);
+
+
+
+// Create overlay for tap-to-start / game-over text
+
+const overlay = document.createElement("div");
+
+overlay.id = "overlay";
+
+overlay.style.position = "absolute";
+
+overlay.style.top = "0";
+
+overlay.style.left = "0";
+
+overlay.style.right = "0";
+
+overlay.style.bottom = "0";
+
+overlay.style.zIndex = "20";
+
+overlay.style.display = "flex";
+
+overlay.style.alignItems = "center";
+
+overlay.style.justifyContent = "center";
+
+overlay.style.fontFamily = "sans-serif";
+
+overlay.style.fontSize = "28px";
+
+overlay.style.color = "white";
+
+overlay.style.textShadow = "0 0 8px rgba(0,0,0,0.7)";
+
+overlay.style.background = "rgba(0,0,0,0.35)";
+
+overlay.textContent = "Tap to start";
+
+parent.appendChild(overlay);
+
+
+
+// Create renderer canvas
+
+const canvas = document.createElement("canvas");
+
+canvas.id = "game-canvas";
+
+canvas.style.width = "100%";
+
+canvas.style.height = "100%";
+
+canvas.style.display = "block";
+
+parent.appendChild(canvas);
+
+
+
+// ---------- Three.js setup ----------
+
+const scene = new THREE.Scene();
+
+scene.background = new THREE.Color(0x87cefa); // light sky
+
+
+
+// Get parent container dimensions for camera and renderer
+
+const parentBounds = parent.getBoundingClientRect();
+
+const camera = new THREE.PerspectiveCamera(
+
+  60,
+
+  parentBounds.width / parentBounds.height,
+
+  0.1,
+
+  1000
+
+);
+
+camera.position.set(0, 3, 8);
+
+camera.lookAt(0, 0, -10);
+
+
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+
+// Use the parent container dimensions
+
+renderer.setSize(parentBounds.width, parentBounds.height);
+
+renderer.setPixelRatio(window.devicePixelRatio || 1);
+
+
+
+const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+
+scene.add(ambient);
+
+const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+
+dir.position.set(5, 10, 3);
+
+scene.add(dir);
+
+
+
+// ---------- Game state ----------
+
+const GameState = {
+
+  Menu: "MENU",
+
+  Playing: "PLAYING",
+
+  GameOver: "GAME_OVER",
+
+} as const;
+
+type GameState = typeof GameState[keyof typeof GameState];
+
+
 
 let gameState: GameState = GameState.Menu;
 
@@ -20,9 +202,9 @@ let gameState: GameState = GameState.Menu;
 
 let playerMesh: THREE.Mesh | null = null;
 
-let trackSegments: THREE.Mesh[] = [];
+const trackSegments: THREE.Mesh[] = [];
 
-let obstacles: THREE.Mesh[] = [];
+const obstacles: THREE.Mesh[] = [];
 
 
 
@@ -36,275 +218,39 @@ let lastObstacleZ = 0;
 
 const TRACK_SEGMENT_LENGTH = 10;
 
-const TRACK_SPEED = 0.25;  // can adjust later
+const TRACK_SPEED = 0.25;
 
-// --------------------------------------------------
-
-
-
-// Three.js core
-
-let scene: THREE.Scene;
-
-let camera: THREE.PerspectiveCamera;
-
-let renderer: THREE.WebGLRenderer;
-
-
-
-// DOM elements
-
-const canvas = document.getElementById("game-canvas") as HTMLCanvasElement | null;
-
-const tapOverlay = document.getElementById("tap-to-start-overlay") as HTMLDivElement | null;
-
-const scoreEl = document.getElementById("score") as HTMLDivElement | null;
-
-const highScoreEl = document.getElementById("high-score") as HTMLDivElement | null;
-
-
-
-if (!canvas) {
-
-  throw new Error("Canvas #game-canvas not found");
-
-}
-
-
-
-// Game values
-
-let score = 0;
-
-let highScore = 0;
-
-let elapsedSinceStart = 0;
-
-const baseForwardSpeed = 10;
-
-let forwardSpeed = baseForwardSpeed;
-
-
-
-// Lanes
-
-const LANE_X_POSITIONS = [-1.5, 0, 1.5];
+const LANES = [-2, 0, 2];
 
 let currentLaneIndex = 1;
 
-let targetLaneX = LANE_X_POSITIONS[currentLaneIndex];
 
 
+// ---------- Helpers ----------
 
-// World objects
+function updateScoreUI() {
 
-let player: THREE.Mesh | null = null;
+  scoreLabel.textContent = `Score: ${Math.floor(currentScore)}`;
 
-const slideSegments: THREE.Mesh[] = [];
-
-const obstacles: THREE.Mesh[] = [];
-
-
-
-// Config
-
-const SEGMENT_LENGTH = 20;
-
-const SEGMENT_COUNT = 8;
-
-const OBSTACLE_CHANCE_PER_SEGMENT = 0.5;
-
-
-
-// Pointer input state
-
-let isDragging = false;
-
-let dragStartX = 0;
-
-let dragCurrentX = 0;
-
-
-
-function updateHud() {
-
-  if (scoreEl) scoreEl.textContent = `Score: ${Math.floor(score)}`;
-
-  if (highScoreEl) highScoreEl.textContent = `Best: ${Math.floor(highScore)}`;
+  bestLabel.textContent = `Best: ${Math.floor(bestScore)}`;
 
 }
 
 
 
-function updateScoreUI(score: number, best: number) {
+function setOverlay(text: string | null) {
 
-  if (scoreEl) scoreEl.textContent = `Score: ${Math.floor(score)}`;
+  if (!text) {
 
-  if (highScoreEl) highScoreEl.textContent = `Best: ${Math.floor(best)}`;
-
-}
-
-
-
-function hideMenuOverlay() {
-
-  if (tapOverlay) {
-
-    tapOverlay.style.display = "none";
-
-  }
-
-  // Hide share/edit buttons when gameState === Playing
-
-  const shareBtn = document.getElementById("share-button") as HTMLElement | null;
-
-  const editBtn = document.getElementById("edit-button") as HTMLElement | null;
-
-  if (shareBtn) shareBtn.style.display = "none";
-
-  if (editBtn) editBtn.style.display = "none";
-
-}
-
-
-
-function showMenuOverlay() {
-
-  if (tapOverlay) {
-
-    tapOverlay.style.display = "flex";
-
-    const text = tapOverlay.querySelector(".tap-text") as HTMLDivElement | null;
-
-    if (text) {
-
-      text.textContent = "Tap to start";
-
-    }
-
-  }
-
-  // Show share/edit buttons in Menu state
-
-  const shareBtn = document.getElementById("share-button") as HTMLElement | null;
-
-  const editBtn = document.getElementById("edit-button") as HTMLElement | null;
-
-  if (shareBtn) shareBtn.style.display = "block";
-
-  if (editBtn) editBtn.style.display = "block";
-
-}
-
-
-
-function showGameOverOverlay() {
-
-  // Show restart button ONLY when gameState === GameOver
-
-  const restartBtn = document.getElementById("restart-button") as HTMLElement | null;
-
-  
-
-  if (gameState === GameState.GameOver) {
-
-    if (tapOverlay) {
-
-      tapOverlay.style.display = "flex";
-
-      const text = tapOverlay.querySelector(".tap-text") as HTMLDivElement | null;
-
-      if (text) {
-
-        text.textContent = "Game Over – Tap to restart";
-
-      }
-
-    }
-
-    if (restartBtn) restartBtn.style.display = "block";
+    overlay.style.display = "none";
 
   } else {
 
-    // Hide restart button when not in GameOver state
+    overlay.style.display = "flex";
 
-    if (restartBtn) restartBtn.style.display = "none";
+    overlay.textContent = text;
 
   }
-
-}
-
-
-
-// ----- World creation -----
-
-
-
-function createScene() {
-
-  scene = new THREE.Scene();
-
-  scene.background = new THREE.Color(0x87cefa);
-
-
-
-  const aspect = window.innerWidth / window.innerHeight;
-
-  camera = new THREE.PerspectiveCamera(60, aspect, 0.1, 1000);
-
-  camera.position.set(0, 3, 8);
-
-  camera.lookAt(0, 1, -20);
-
-
-
-  renderer = new THREE.WebGLRenderer({
-
-    canvas,
-
-    antialias: true,
-
-  });
-
-  renderer.setSize(window.innerWidth, window.innerHeight);
-
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-
-
-  // Lights
-
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-
-  scene.add(ambient);
-
-
-
-  const directional = new THREE.DirectionalLight(0xffffff, 0.8);
-
-  directional.position.set(5, 10, 5);
-
-  scene.add(directional);
-
-
-
-  window.addEventListener("resize", onWindowResize);
-
-}
-
-
-
-function onWindowResize() {
-
-  const width = window.innerWidth;
-
-  const height = window.innerHeight;
-
-  camera.aspect = width / height;
-
-  camera.updateProjectionMatrix();
-
-  renderer.setSize(width, height);
 
 }
 
@@ -312,9 +258,11 @@ function onWindowResize() {
 
 function createPlayer() {
 
-  if (playerMesh) scene.remove(playerMesh);
+  if (playerMesh) {
 
+    scene.remove(playerMesh);
 
+  }
 
   const geo = new THREE.SphereGeometry(0.5, 32, 32);
 
@@ -322,7 +270,9 @@ function createPlayer() {
 
   playerMesh = new THREE.Mesh(geo, mat);
 
-  playerMesh.position.set(0, 0.5, 0); // center lane
+  currentLaneIndex = 1;
+
+  playerMesh.position.set(LANES[currentLaneIndex], 0.5, 0);
 
   scene.add(playerMesh);
 
@@ -332,21 +282,31 @@ function createPlayer() {
 
 function createInitialTrack() {
 
-  trackSegments.forEach(s => scene.remove(s));
+  // Remove old
 
-  trackSegments = [];
+  while (trackSegments.length > 0) {
+
+    const seg = trackSegments.pop();
+
+    if (seg) scene.remove(seg);
+
+  }
+
+  while (obstacles.length > 0) {
+
+    const ob = obstacles.pop();
+
+    if (ob) scene.remove(ob);
+
+  }
 
 
 
-  obstacles.forEach(o => scene.remove(o));
-
-  obstacles = [];
-
-  lastObstacleZ = 0;
+  lastObstacleZ = -20;
 
 
 
-  const trackWidth = 6; // 3 lanes
+  const trackWidth = 6;
 
   const segmentCount = 20;
 
@@ -356,7 +316,7 @@ function createInitialTrack() {
 
     const geo = new THREE.BoxGeometry(trackWidth, 0.2, TRACK_SEGMENT_LENGTH);
 
-    const mat = new THREE.MeshStandardMaterial({ color: 0x0050a0 }); // blue
+    const mat = new THREE.MeshStandardMaterial({ color: 0x0050a0 });
 
     const mesh = new THREE.Mesh(geo, mat);
 
@@ -374,11 +334,9 @@ function createInitialTrack() {
 
 function spawnObstacleRow(zPos: number) {
 
-  const lanes = [-2, 0, 2];
+  const laneIndex = Math.floor(Math.random() * LANES.length);
 
-  const laneIndex = Math.floor(Math.random() * lanes.length);
-
-  const xPos = lanes[laneIndex];
+  const xPos = LANES[laneIndex];
 
 
 
@@ -390,8 +348,6 @@ function spawnObstacleRow(zPos: number) {
 
   obstacle.position.set(xPos, 0.5, zPos);
 
-
-
   obstacles.push(obstacle);
 
   scene.add(obstacle);
@@ -402,195 +358,15 @@ function spawnObstacleRow(zPos: number) {
 
 
 
-function createSlideSegment(zIndex: number): THREE.Mesh {
+function movePlayerToLane(index: number) {
 
-  const geom = new THREE.BoxGeometry(5, 0.2, SEGMENT_LENGTH);
+  if (!playerMesh || gameState !== GameState.Playing) return;
 
-  const mat = new THREE.MeshPhongMaterial({ color: 0x1e7be6 });
+  if (index < 0 || index >= LANES.length) return;
 
-  const mesh = new THREE.Mesh(geom, mat);
+  currentLaneIndex = index;
 
-  mesh.position.set(0, 0, -zIndex * SEGMENT_LENGTH);
-
-  mesh.receiveShadow = true;
-
-  scene.add(mesh);
-
-  return mesh;
-
-}
-
-
-
-function spawnObstacleOnSegment(segment: THREE.Mesh) {
-
-  if (Math.random() > OBSTACLE_CHANCE_PER_SEGMENT) return;
-
-
-
-  const laneIndex = Math.floor(Math.random() * LANE_X_POSITIONS.length);
-
-  const x = LANE_X_POSITIONS[laneIndex];
-
-
-
-  const geom = new THREE.BoxGeometry(0.8, 0.8, 0.8);
-
-  const mat = new THREE.MeshPhongMaterial({ color: 0xff4444 });
-
-  const box = new THREE.Mesh(geom, mat);
-
-
-
-  const localZ = (Math.random() * SEGMENT_LENGTH) - SEGMENT_LENGTH / 2;
-
-  box.position.set(x, 0.6, segment.position.z + localZ);
-
-
-
-  scene.add(box);
-
-  obstacles.push(box);
-
-}
-
-
-
-function createWorld() {
-
-  // clear old
-
-  slideSegments.forEach(seg => scene.remove(seg));
-
-  slideSegments.length = 0;
-
-  obstacles.forEach(o => scene.remove(o));
-
-  obstacles.length = 0;
-
-
-
-  for (let i = 0; i < SEGMENT_COUNT; i++) {
-
-    const seg = createSlideSegment(i);
-
-    slideSegments.push(seg);
-
-    spawnObstacleOnSegment(seg);
-
-  }
-
-
-
-  if (!player) {
-
-    createPlayer();
-
-  } else {
-
-    player.position.set(0, 1, 0);
-
-  }
-
-
-
-  currentLaneIndex = 1;
-
-  targetLaneX = LANE_X_POSITIONS[currentLaneIndex];
-
-  if (player) {
-
-    player.position.x = targetLaneX;
-
-  }
-
-}
-
-
-
-// ----- Input (lanes) -----
-
-
-
-function setLane(index: number) {
-
-  currentLaneIndex = Math.max(0, Math.min(LANE_X_POSITIONS.length - 1, index));
-
-  targetLaneX = LANE_X_POSITIONS[currentLaneIndex];
-
-}
-
-
-
-function onPointerDown(clientX: number) {
-
-  isDragging = true;
-
-  dragStartX = clientX;
-
-  dragCurrentX = clientX;
-
-}
-
-
-
-function onPointerMove(clientX: number) {
-
-  if (!isDragging) return;
-
-  dragCurrentX = clientX;
-
-}
-
-
-
-function onPointerUp() {
-
-  if (!isDragging) return;
-
-  const deltaX = dragCurrentX - dragStartX;
-
-  const SWIPE_THRESHOLD = 40;
-
-
-
-  if (deltaX > SWIPE_THRESHOLD) {
-
-    setLane(currentLaneIndex + 1);
-
-  } else if (deltaX < -SWIPE_THRESHOLD) {
-
-    setLane(currentLaneIndex - 1);
-
-  }
-
-
-
-  isDragging = false;
-
-}
-
-
-
-// ----- Game state helpers -----
-
-
-
-function resetGame() {
-
-  score = 0;
-
-  elapsedSinceStart = 0;
-
-  forwardSpeed = baseForwardSpeed;
-
-  currentLaneIndex = 1;
-
-  targetLaneX = LANE_X_POSITIONS[currentLaneIndex];
-
-  createWorld();
-
-  updateHud();
+  playerMesh.position.x = LANES[currentLaneIndex];
 
 }
 
@@ -602,19 +378,15 @@ function startGame() {
 
   currentScore = 0;
 
-
-
   createPlayer();
 
   createInitialTrack();
 
   spawnObstacleRow(-25);
 
+  updateScoreUI();
 
-
-  updateScoreUI(currentScore, bestScore);  // should already exist
-
-  hideMenuOverlay();                       // must hide "tap to start" + share/edit
+  setOverlay(null);
 
 }
 
@@ -624,85 +396,37 @@ function endGame() {
 
   gameState = GameState.GameOver;
 
-  if (currentScore > bestScore) bestScore = currentScore;
+  if (currentScore > bestScore) {
 
+    bestScore = currentScore;
 
+  }
 
-  updateScoreUI(currentScore, bestScore);
+  updateScoreUI();
 
-  showGameOverOverlay();  // should display "Game Over – tap to restart"
+  setOverlay("Game Over – tap to restart");
 
 }
 
 
 
-// ----- Game update / collisions -----
+// Expose for debugging if needed
+
+(window as any).startGame = startGame;
 
 
 
-function checkCollisions() {
+// ---------- Input (tap to start / restart + swipe left/right) ----------
 
-  if (!player) return;
-
-
-
-  const playerPos = player.position;
-
-  const playerRadius = 0.5;
-
-  const toRemove: THREE.Mesh[] = [];
+let touchStartX: number | null = null;
 
 
 
-  for (const o of obstacles) {
+function handleTapOrClick() {
 
-    const dx = o.position.x - playerPos.x;
+  if (gameState === GameState.Menu || gameState === GameState.GameOver) {
 
-    const dy = o.position.y - playerPos.y;
-
-    const dz = o.position.z - playerPos.z;
-
-    const distSq = dx * dx + dy * dy + dz * dz;
-
-
-
-    const obstacleRadius = 0.6;
-
-    const combined = playerRadius + obstacleRadius;
-
-
-
-    if (distSq < combined * combined) {
-
-      endGame();
-
-      return;
-
-    }
-
-
-
-    if (o.position.z > camera.position.z + 10) {
-
-      toRemove.push(o);
-
-    }
-
-  }
-
-
-
-  if (toRemove.length > 0) {
-
-    for (const o of toRemove) {
-
-      const idx = obstacles.indexOf(o);
-
-      if (idx !== -1) obstacles.splice(idx, 1);
-
-      scene.remove(o);
-
-    }
+    startGame();
 
   }
 
@@ -710,93 +434,79 @@ function checkCollisions() {
 
 
 
-function updateGame(delta: number) {
+window.addEventListener("pointerdown", (ev) => {
 
-  elapsedSinceStart += delta;
+  touchStartX = ev.clientX;
 
-  forwardSpeed = baseForwardSpeed + elapsedSinceStart * 0.5;
-
-
-
-  score += delta * 10;
-
-  updateHud();
+});
 
 
 
-  if (player) {
+window.addEventListener("pointerup", (ev) => {
 
-    const LERP_FACTOR = 10;
+  if (touchStartX === null) {
 
-    player.position.x += (targetLaneX - player.position.x) * Math.min(LERP_FACTOR * delta, 1);
+    handleTapOrClick();
+
+    return;
 
   }
 
 
 
-  slideSegments.forEach((seg) => {
+  const dx = ev.clientX - touchStartX;
 
-    seg.position.z += forwardSpeed * delta;
-
-
-
-    if (seg.position.z - SEGMENT_LENGTH / 2 > camera.position.z + 5) {
-
-      seg.position.z -= SEGMENT_LENGTH * SEGMENT_COUNT;
+  const absDx = Math.abs(dx);
 
 
 
-      seg.position.x = (Math.random() - 0.5) * 1.0;
+  // Small movement = tap
 
+  if (absDx < 20) {
 
+    handleTapOrClick();
 
-      // clear obstacles near this z
+  } else if (gameState === GameState.Playing) {
 
-      for (let i = obstacles.length - 1; i >= 0; i--) {
+    // Swipe
 
-        const o = obstacles[i];
+    if (dx < 0) {
 
-        if (Math.abs(o.position.z - seg.position.z) < SEGMENT_LENGTH * 0.6) {
+      movePlayerToLane(currentLaneIndex - 1);
 
-          scene.remove(o);
+    } else {
 
-          obstacles.splice(i, 1);
-
-        }
-
-      }
-
-
-
-      spawnObstacleOnSegment(seg);
+      movePlayerToLane(currentLaneIndex + 1);
 
     }
 
-  });
+  }
 
 
 
-  obstacles.forEach((o) => {
+  touchStartX = null;
 
-    o.position.z += forwardSpeed * delta;
-
-  });
+});
 
 
 
-  checkCollisions();
+// ---------- Resize ----------
 
-}
+window.addEventListener("resize", () => {
+
+  const bounds = parent.getBoundingClientRect();
+
+  camera.aspect = bounds.width / bounds.height;
+
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(bounds.width, bounds.height);
+
+});
 
 
 
-// ----- Main loop -----
-
-
-
-let lastTime = 0;
-
-
+// ---------- Animation loop ----------
 
 function animate() {
 
@@ -806,9 +516,13 @@ function animate() {
 
   if (gameState === GameState.Playing) {
 
-    // Move track segments
+    // Move track
 
-    trackSegments.forEach(seg => seg.position.z += TRACK_SPEED);
+    trackSegments.forEach((seg) => {
+
+      seg.position.z += TRACK_SPEED;
+
+    });
 
 
 
@@ -816,11 +530,15 @@ function animate() {
 
     const maxZ = 5;
 
-    trackSegments.forEach(seg => {
+    trackSegments.forEach((seg) => {
 
       if (seg.position.z > maxZ) {
 
-        const minZ = Math.min(...trackSegments.map(s => s.position.z));
+        const minZ = Math.min(
+
+          ...trackSegments.map((s) => s.position.z)
+
+        );
 
         seg.position.z = minZ - TRACK_SEGMENT_LENGTH;
 
@@ -832,17 +550,25 @@ function animate() {
 
     // Move obstacles
 
-    obstacles.forEach(o => o.position.z += TRACK_SPEED);
+      obstacles.forEach((o) => {
+
+      o.position.z += TRACK_SPEED;
+
+    });
 
 
 
-    // Spawn new obstacles
+    // Spawn new obstacles ahead
 
-    const neededZ = Math.min(...trackSegments.map(s => s.position.z)) - 15;
+    const minTrackZ = Math.min(
 
-    if (lastObstacleZ > neededZ) {
+      ...trackSegments.map((s) => s.position.z)
 
-      spawnObstacleRow(lastObstacleZ - 10);
+    );
+
+    if (lastObstacleZ > minTrackZ - 20) {
+
+      spawnObstacleRow(lastObstacleZ - 12);
 
     }
 
@@ -852,7 +578,7 @@ function animate() {
 
     currentScore += TRACK_SPEED * 0.1;
 
-    updateScoreUI(Math.floor(currentScore), bestScore);
+    updateScoreUI();
 
 
 
@@ -888,164 +614,12 @@ function animate() {
 
 
 
-// ----- Overlay tap handler -----
+// Initial UI state
 
+updateScoreUI();
 
+setOverlay("Tap to start");
 
-function handleOverlayTap(ev: Event) {
 
-  ev.preventDefault();
 
-  startGame();
-
-}
-
-
-
-// ----- Init -----
-
-
-
-createScene();
-
-createWorld();
-
-updateHud();
-
-animate();  // <-- make sure this is called ONCE during setup!
-
-
-
-// Pointer events for lanes
-
-canvas.addEventListener("mousedown", (e) => {
-
-  e.preventDefault();
-
-  onPointerDown(e.clientX);
-
-});
-
-canvas.addEventListener("mousemove", (e) => {
-
-  e.preventDefault();
-
-  onPointerMove(e.clientX);
-
-});
-
-canvas.addEventListener("mouseup", (e) => {
-
-  e.preventDefault();
-
-  onPointerUp();
-
-});
-
-
-
-canvas.addEventListener(
-
-  "touchstart",
-
-  (e) => {
-
-    if (e.touches.length > 0) {
-
-      e.preventDefault();
-
-      onPointerDown(e.touches[0].clientX);
-
-    }
-
-  },
-
-  { passive: false }
-
-);
-
-
-
-canvas.addEventListener(
-
-  "touchmove",
-
-  (e) => {
-
-    if (e.touches.length > 0) {
-
-      e.preventDefault();
-
-      onPointerMove(e.touches[0].clientX);
-
-    }
-
-  },
-
-  { passive: false }
-
-);
-
-
-
-canvas.addEventListener(
-
-  "touchend",
-
-  (e) => {
-
-    e.preventDefault();
-
-    onPointerUp();
-
-  },
-
-  { passive: false }
-
-);
-
-
-
-// Overlay tap to start / restart
-
-if (tapOverlay) {
-
-  tapOverlay.addEventListener("click", handleOverlayTap);
-
-  tapOverlay.addEventListener(
-
-    "touchstart",
-
-    handleOverlayTap,
-
-    { passive: false }
-
-  );
-
-}
-
-
-
-// Restart button handler - make sure tap/click on restart calls startGame()
-
-const restartBtn = document.getElementById("restart-button") as HTMLElement | null;
-
-if (restartBtn) {
-
-  restartBtn.addEventListener("click", (ev) => {
-
-    ev.preventDefault();
-
-    startGame();
-
-  });
-
-  restartBtn.addEventListener("touchstart", (ev) => {
-
-    ev.preventDefault();
-
-    startGame();
-
-  }, { passive: false });
-
-}
+animate();

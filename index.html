@@ -4,18 +4,37 @@
     <meta charset="UTF-8" />
     <title>Blue Slide Park – Prototype</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <div id="hud">
-      <div id="score">Score: 0</div>
-      <div id="high-score">Best: 0</div>
-    </div>
+    <!-- Hero section with blue slide and child illustration -->
+    <section class="hero">
+      <div class="hero-graphics">
+        <!-- Blue slide background illustration -->
+        <div class="slide-illustration">
+          <img src="/assets/slide.png" alt="Blue Slide" class="slide-image" />
+        </div>
 
-    <div id="tap-to-start-overlay">
-      <div class="tap-text">Tap to start</div>
-    </div>
+        <!-- Child on slide illustration -->
+        <div class="child-illustration">
+          <img src="/assets/child.png" alt="Child on Slide" class="child-image" />
+        </div>
 
-    <canvas id="game-canvas"></canvas>
+        <!-- Phone mockup with game inside -->
+        <div class="phone-mockup">
+          <div class="phone-frame">
+            <!-- Phone screen area - game renders here -->
+            <div class="phone-screen">
+              <div id="game-root" class="game-root"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-text">
+        <!-- Title, description, buttons, etc. can go here -->
+      </div>
+    </section>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
