@@ -17,6 +17,7 @@ This project is a tribute to the original Blue Slide Park game, recreated with m
 
 ## Getting Started
 
+
 ### Prerequisites
 
 - Node.js (v16 or higher recommended)
